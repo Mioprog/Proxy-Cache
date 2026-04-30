@@ -69,6 +69,7 @@ def handle_client(client_socket):
         request_line = request.splitlines()[0]
         cache_key = generate_cache_key(request_line)
 
+        cached_data = None
         with cache_store.cache_lock:
             if cache_key in cache:
                 cache_entry = cache[cache_key]
@@ -79,8 +80,10 @@ def handle_client(client_socket):
                     print(f"[CACHE HIT] Pour la requête : {request_line}")
                     cache_store.stats["hits"] += 1
                     cached_data = cache_entry['data']
-                    client_socket.sendall(cached_data)
-                    return
+
+        if cached_data is not None:
+            client_socket.sendall(cached_data)
+            return
 
         cache_store.stats["misses"] += 1
         print(f"[CACHE MISS] Pour la requête : {request_line}")

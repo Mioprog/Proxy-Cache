@@ -13,9 +13,9 @@ def reset_state():
     """Reset shared state before each test."""
     with cache_store.cache_lock:
         cache_store.cache.clear()
-    cache_store.stats["hits"] = 0
-    cache_store.stats["misses"] = 0
-    cache_store.stats["start_time"] = time.time()
+        cache_store.stats["hits"] = 0
+        cache_store.stats["misses"] = 0
+        cache_store.stats["start_time"] = time.time()
     cache_store.cache_expiration_time = 60
     yield
 
@@ -65,8 +65,8 @@ def test_stats_reflects_cache_state():
             "data": b"hello",
             "timestamp": time.time(),
         }
-    cache_store.stats["hits"] = 3
-    cache_store.stats["misses"] = 7
+        cache_store.stats["hits"] = 3
+        cache_store.stats["misses"] = 7
 
     response = client.get("/api/stats")
     data = response.json()

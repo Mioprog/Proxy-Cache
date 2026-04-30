@@ -2,7 +2,7 @@ import time
 import os
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import FastAPI, Depends, HTTPException, Request, Header
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -36,13 +36,13 @@ async def dashboard(request: Request):
 # ── API endpoints ─────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
-async def health():
+async def health(_: None = Depends(_check_token)):
     """Return server health status."""
     return {"status": "ok", "timestamp": time.time()}
 
 
 @app.get("/api/stats")
-async def stats():
+async def stats(_: None = Depends(_check_token)):
     """Return proxy/cache statistics."""
     with cache_store.cache_lock:
         cache_entries = len(cache_store.cache)
@@ -61,7 +61,7 @@ async def stats():
 
 
 @app.get("/api/cache")
-async def list_cache(page: int = 1, per_page: int = 20):
+async def list_cache(page: int = 1, per_page: int = 20, _: None = Depends(_check_token)):
     """Return a paginated list of cached entries."""
     if page < 1:
         raise HTTPException(status_code=400, detail="page must be >= 1")
@@ -93,7 +93,7 @@ async def list_cache(page: int = 1, per_page: int = 20):
 
 
 @app.delete("/api/cache")
-async def clear_cache():
+async def clear_cache(_: None = Depends(_check_token)):
     """Clear all cache entries."""
     with cache_store.cache_lock:
         count = len(cache_store.cache)
@@ -102,7 +102,7 @@ async def clear_cache():
 
 
 @app.delete("/api/cache/{key:path}")
-async def delete_cache_entry(key: str):
+async def delete_cache_entry(key: str, _: None = Depends(_check_token)):
     """Delete a specific cache entry by key."""
     with cache_store.cache_lock:
         if key not in cache_store.cache:
