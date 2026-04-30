@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proxy-Cache Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; color: #38bdf8; }
+    header .status { display: flex; align-items: center; gap: .5rem; font-size: .85rem; color: #94a3b8; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; }
+    .dot.offline { background: #ef4444; }
+
+    main { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+
+    /* Stats grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+    }
+    .stat-card .label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: #64748b; margin-bottom: .4rem; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; color: #f1f5f9; }
+    .stat-card .sub   { font-size: .8rem; color: #94a3b8; margin-top: .2rem; }
+
+    /* Actions bar */
+    .actions {
+      display: flex;
+      gap: .75rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.5rem;
+      align-items: center;
+    }
+    .actions h2 { font-size: 1.1rem; font-weight: 600; margin-right: auto; }
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      padding: .55rem 1.1rem;
+      font-size: .875rem;
+      font-weight: 600;
+      transition: opacity .15s;
+    }
+    button:hover { opacity: .85; }
+    .btn-danger  { background: #dc2626; color: #fff; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-ghost   { background: #334155; color: #e2e8f0; }
+
+    /* Cache table */
+    .table-wrap {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #0f172a; }
+    th, td {
+      padding: .75rem 1rem;
+      text-align: left;
+      font-size: .875rem;
+      border-bottom: 1px solid #1e293b;
+    }
+    th { color: #64748b; font-weight: 600; text-transform: uppercase; font-size: .75rem; letter-spacing: .05em; }
+    tbody tr:hover { background: #263248; }
+    td.key-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; color: #93c5fd; }
+    td.expired { color: #f87171; }
+
+    .badge {
+      display: inline-block;
+      padding: .2rem .55rem;
+      border-radius: 9999px;
+      font-size: .75rem;
+      font-weight: 600;
+    }
+    .badge-ok  { background: #14532d; color: #4ade80; }
+    .badge-exp { background: #7f1d1d; color: #f87171; }
+
+    .del-btn {
+      background: transparent;
+      color: #f87171;
+      border: 1px solid #7f1d1d;
+      padding: .25rem .6rem;
+      font-size: .75rem;
+      border-radius: 6px;
+    }
+    .del-btn:hover { background: #7f1d1d; }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: .5rem;
+      padding: .75rem 1rem;
+      border-top: 1px solid #334155;
+      font-size: .85rem;
+      color: #94a3b8;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 1.5rem; right: 1.5rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: .75rem 1.25rem;
+      font-size: .875rem;
+      max-width: 320px;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity .25s, transform .25s;
+      pointer-events: none;
+      z-index: 100;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+    #toast.success { border-color: #16a34a; color: #4ade80; }
+    #toast.error   { border-color: #dc2626; color: #f87171; }
+
+    .empty { text-align: center; padding: 3rem; color: #475569; font-size: .95rem; }
+    .refresh-note { font-size: .78rem; color: #475569; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🛡️ Proxy-Cache Dashboard</h1>
+    <div class="status">
+      <span class="dot" id="health-dot"></span>
+      <span id="health-text">Vérification…</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="label">Cache Hits</div>
+        <div class="value" id="s-hits">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Cache Misses</div>
+        <div class="value" id="s-misses">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Taux de hit</div>
+        <div class="value" id="s-ratio">—</div>
+        <div class="sub">hits / (hits + misses)</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Entrées en cache</div>
+        <div class="value" id="s-entries">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Taille du cache</div>
+        <div class="value" id="s-size">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Uptime</div>
+        <div class="value" id="s-uptime">—</div>
+        <div class="sub">jj:hh:mm:ss</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Expiration TTL</div>
+        <div class="value" id="s-ttl">—</div>
+        <div class="sub">secondes</div>
+      </div>
+    </div>
+
+    <!-- Cache entries -->
+    <div class="actions">
+      <h2>Entrées en cache</h2>
+      <span class="refresh-note" id="last-refresh"></span>
+      <button class="btn-ghost" onclick="loadCache()">🔄 Rafraîchir</button>
+      <button class="btn-danger" onclick="clearCache()">🗑️ Vider le cache</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Clé (requête)</th>
+            <th>Taille</th>
+            <th>Créé le</th>
+            <th>Expire le</th>
+            <th>État</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="cache-tbody">
+          <tr><td colspan="7" class="empty">Chargement…</td></tr>
+        </tbody>
+      </table>
+      <div class="pagination" id="pagination"></div>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+
+  <script>
+    const PER_PAGE = 20;
+    let currentPage = 1;
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    function fmt_bytes(b) {
+      if (b < 1024) return b + ' B';
+      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+      return (b / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function fmt_uptime(seconds) {
+      const d = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400) / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.floor(seconds % 60);
+      return `${String(d).padStart(2,'0')}:${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+
+    function fmt_ts(ts) {
+      return new Date(ts * 1000).toLocaleString('fr-FR');
+    }
+
+    function show_toast(msg, type = 'success') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = `show ${type}`;
+      clearTimeout(t._timer);
+      t._timer = setTimeout(() => t.className = '', 3000);
+    }
+
+    // ── Health ───────────────────────────────────────────────────────────────
+
+    async function checkHealth() {
+      const dot  = document.getElementById('health-dot');
+      const text = document.getElementById('health-text');
+      try {
+        const r = await fetch('/api/health');
+        if (r.ok) {
+          dot.className  = 'dot';
+          text.textContent = 'En ligne';
+        } else {
+          dot.className  = 'dot offline';
+          text.textContent = 'Hors ligne';
+        }
+      } catch {
+        dot.className  = 'dot offline';
+        text.textContent = 'Hors ligne';
+      }
+    }
+
+    // ── Stats ────────────────────────────────────────────────────────────────
+
+    async function loadStats() {
+      try {
+        const r = await fetch('/api/stats');
+        if (!r.ok) return;
+        const d = await r.json();
+
+        document.getElementById('s-hits').textContent    = d.hits.toLocaleString('fr-FR');
+        document.getElementById('s-misses').textContent  = d.misses.toLocaleString('fr-FR');
+        const total = d.hits + d.misses;
+        document.getElementById('s-ratio').textContent   = total ? ((d.hits / total) * 100).toFixed(1) + ' %' : '—';
+        document.getElementById('s-entries').textContent = d.cache_entries.toLocaleString('fr-FR');
+        document.getElementById('s-size').textContent    = fmt_bytes(d.cache_size_bytes);
+        document.getElementById('s-uptime').textContent  = fmt_uptime(d.uptime_seconds);
+        document.getElementById('s-ttl').textContent     = d.cache_expiration_seconds;
+      } catch (e) {
+        console.error('Stats error', e);
+      }
+    }
+
+    // ── Cache list ───────────────────────────────────────────────────────────
+
+    async function loadCache(page = currentPage) {
+      currentPage = page;
+      try {
+        const r = await fetch(`/api/cache?page=${page}&per_page=${PER_PAGE}`);
+        if (!r.ok) return;
+        const d = await r.json();
+
+        const tbody = document.getElementById('cache-tbody');
+        if (d.entries.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" class="empty">Le cache est vide.</td></tr>';
+        } else {
+          const offset = (page - 1) * PER_PAGE;
+          tbody.innerHTML = d.entries.map((e, i) => `
+            <tr>
+              <td>${offset + i + 1}</td>
+              <td class="key-cell" title="${escHtml(e.key)}">${escHtml(e.key)}</td>
+              <td>${fmt_bytes(e.size_bytes)}</td>
+              <td>${fmt_ts(e.created_at)}</td>
+              <td>${fmt_ts(e.expires_at)}</td>
+              <td><span class="badge ${e.expired ? 'badge-exp' : 'badge-ok'}">${e.expired ? 'Expiré' : 'Actif'}</span></td>
+              <td><button class="del-btn" onclick="deleteEntry(${JSON.stringify(e.key)})">Supprimer</button></td>
+            </tr>`).join('');
+        }
+
+        // Pagination
+        const pag = document.getElementById('pagination');
+        const pages = Math.ceil(d.total / PER_PAGE) || 1;
+        pag.innerHTML = pages <= 1 ? '' : `
+          Page ${page} / ${pages} —
+          <button class="btn-ghost" style="padding:.3rem .8rem;font-size:.8rem" ${page <= 1 ? 'disabled' : ''} onclick="loadCache(${page - 1})">‹ Précédent</button>
+          <button class="btn-ghost" style="padding:.3rem .8rem;font-size:.8rem" ${page >= pages ? 'disabled' : ''} onclick="loadCache(${page + 1})">Suivant ›</button>`;
+
+        document.getElementById('last-refresh').textContent =
+          'Dernière mise à jour : ' + new Date().toLocaleTimeString('fr-FR');
+      } catch (e) {
+        console.error('Cache list error', e);
+      }
+    }
+
+    function escHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+
+    async function clearCache() {
+      if (!confirm('Vider tout le cache ?')) return;
+      try {
+        const r = await fetch('/api/cache', { method: 'DELETE' });
+        if (r.ok) {
+          const d = await r.json();
+          show_toast(`✅ ${d.cleared} entrée(s) supprimée(s)`);
+          loadCache(1);
+          loadStats();
+        } else {
+          show_toast('❌ Erreur lors de la suppression', 'error');
+        }
+      } catch { show_toast('❌ Erreur réseau', 'error'); }
+    }
+
+    async function deleteEntry(key) {
+      try {
+        const encoded = key.split('/').map(encodeURIComponent).join('/');
+        const r = await fetch(`/api/cache/${encoded}`, { method: 'DELETE' });
+        if (r.ok) {
+          show_toast(`✅ Entrée supprimée`);
+          loadCache(currentPage);
+          loadStats();
+        } else if (r.status === 404) {
+          show_toast('⚠️ Entrée introuvable', 'error');
+        } else {
+          show_toast('❌ Erreur lors de la suppression', 'error');
+        }
+      } catch { show_toast('❌ Erreur réseau', 'error'); }
+    }
+
+    // ── Init & auto-refresh ──────────────────────────────────────────────────
+
+    function refresh() {
+      checkHealth();
+      loadStats();
+      loadCache(currentPage);
+    }
+
+    refresh();
+    setInterval(refresh, 10000);  // auto-refresh every 10 s
+  </script>
+</body>
+</html>

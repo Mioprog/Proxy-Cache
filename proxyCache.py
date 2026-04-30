@@ -19,7 +19,10 @@ def load_config(file_path="config.conf"):
         "proxy_port": config.getint("proxy", "port", fallback=8000),
         "apache_host": config.get("apache", "host", fallback="127.0.0.1"),
         "apache_port": config.getint("apache", "port", fallback=80),
-        "cache_expiration_time": cache_expiration_time
+        "cache_expiration_time": cache_expiration_time,
+        "dashboard_host": config.get("dashboard", "host", fallback="127.0.0.1"),
+        "dashboard_port": config.getint("dashboard", "port", fallback=8080),
+        "dashboard_token": config.get("dashboard", "token", fallback=""),
     }
 
 try:
@@ -33,12 +36,18 @@ PROXY_PORT = CONFIG["proxy_port"]
 APACHE_HOST = CONFIG["apache_host"]
 APACHE_PORT = CONFIG["apache_port"]
 CACHE_EXPIRATION_TIME = CONFIG["cache_expiration_time"]
+DASHBOARD_HOST = CONFIG["dashboard_host"]
+DASHBOARD_PORT = CONFIG["dashboard_port"]
+DASHBOARD_TOKEN = CONFIG["dashboard_token"]
+
+import cache_store
+cache_store.cache_expiration_time = CACHE_EXPIRATION_TIME
 
 server_running = True
 server_lock = threading.Lock()
 server = None
 
-cache = {}
+cache = cache_store.cache
 
 def is_cache_expired(cache_entry):
     """Vérifie si l'entrée de cache a expiré."""
@@ -60,16 +69,23 @@ def handle_client(client_socket):
         request_line = request.splitlines()[0]
         cache_key = generate_cache_key(request_line)
 
-        if cache_key in cache:
-            cache_entry = cache[cache_key]
-            if is_cache_expired(cache_entry):
-                print(f"[CACHE EXPIRE] La réponse pour la requête {request_line} a expiré.")
-                del cache[cache_key]
-            else:
-                print(f"[CACHE HIT] Pour la requête : {request_line}")
-                client_socket.sendall(cache_entry['data'])
-                return
+        cached_data = None
+        with cache_store.cache_lock:
+            if cache_key in cache:
+                cache_entry = cache[cache_key]
+                if is_cache_expired(cache_entry):
+                    print(f"[CACHE EXPIRE] La réponse pour la requête {request_line} a expiré.")
+                    del cache[cache_key]
+                else:
+                    print(f"[CACHE HIT] Pour la requête : {request_line}")
+                    cache_store.stats["hits"] += 1
+                    cached_data = cache_entry['data']
 
+        if cached_data is not None:
+            client_socket.sendall(cached_data)
+            return
+
+        cache_store.stats["misses"] += 1
         print(f"[CACHE MISS] Pour la requête : {request_line}")
         apache_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         apache_socket.connect((APACHE_HOST, APACHE_PORT))
@@ -83,10 +99,11 @@ def handle_client(client_socket):
             response += chunk
         apache_socket.close()
 
-        cache[cache_key] = {
-            'data': response,
-            'timestamp': time.time()
-        }
+        with cache_store.cache_lock:
+            cache[cache_key] = {
+                'data': response,
+                'timestamp': time.time()
+            }
 
         client_socket.sendall(response)
     except Exception as e:
@@ -154,8 +171,18 @@ def command_interface():
 
 if __name__ == "__main__":
     try:
+        from dashboard.server import start_dashboard
+
         proxy_thread = threading.Thread(target=start_proxy, daemon=True)
         proxy_thread.start()
+
+        dashboard_thread = threading.Thread(
+            target=start_dashboard,
+            kwargs={"host": DASHBOARD_HOST, "port": DASHBOARD_PORT, "token": DASHBOARD_TOKEN},
+            daemon=True,
+        )
+        dashboard_thread.start()
+        print(f"[DASHBOARD] Accessible sur http://{DASHBOARD_HOST}:{DASHBOARD_PORT}")
 
         command_interface()
 
